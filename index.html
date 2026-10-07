@@ -1,0 +1,295 @@
+<!doctype html><html lang="ko"><head><title>코스모 커피 배달 | 프롬프트 구조화 실습</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{margin:0;background:#0b1030;font-family:"Noto Sans KR","Malgun Gothic",sans-serif;color:#dfe6ff;overflow:auto}main{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}#stage{position:relative;flex:1;min-height:0;width:100%}canvas{width:100%;height:100%;object-fit:contain;display:block}nav{flex-shrink:0;display:flex;justify-content:center;gap:5px;flex-wrap:wrap;padding:9px}button{font:inherit;font-size:12px;border:1px solid #3d4a80;border-radius:3px;background:#141a33;color:#9ef3ff;padding:9px 11px;cursor:pointer;touch-action:none}#retry{position:absolute;left:50%;top:calc(50% + 14px);transform:translateX(-50%);font-size:18px;font-weight:600;padding:12px 30px;border:0;border-radius:24px;background:#ff9f43;color:#1a1230;touch-action:auto}p{font-size:11px;margin:0 8px 8px;color:#9fb0e0;text-align:center}</style></head><body><main><div id="stage"><canvas tabindex="0" aria-label="플레이할 게임"></canvas><button id="retry" hidden>다시 도전</button></div><nav><button id="start">시작 / 계속</button><button id="pause">잠깐 멈추기</button><button id="reset">처음으로</button><button id="action">커피 받기 / 전하기</button><button data-dir="0,-1" aria-label="위">↑</button><button data-dir="-1,0" aria-label="왼쪽">←</button><button data-dir="0,1" aria-label="아래">↓</button><button data-dir="1,0" aria-label="오른쪽">→</button></nav><p>시작을 누른 뒤 방향키 / WASD로 이동 · E / Space로 커피 받기·전하기 · 외계 고양이와 별똥별을 피하세요</p></main><script>/* Cosmo Coffee Run. Original geometry and software 3D renderer. No dependencies. */
+(function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.Daldongne=api})(typeof globalThis!=='undefined'?globalThis:this,function(){
+'use strict';
+const W=1200,H=800,R=6.2,EYE=18.9,GAMMA=1.3,TAU=Math.PI*2,CUPS=6,HEARTS=3;
+// Enemy tuning. Distances are radians on the planet surface, times are seconds. The player walks at .37 rad/s.
+// A cat strolls at `slow`; once armed it gains `accel` every second but can only turn `turn` rad/s, so sidestep it.
+const CAT={max:3,slow:.2,accel:.2,turn:.5,trigger:.5,fuse:3,blast:.16,touch:.07,respawn:2.5};
+const UFO={speed:.5,height:1.9,interval:5.5,stars:4,warn:1.5,gap:.3,fall:.45,radius:.11,spread:.42};
+const add=(a,b)=>a.map((v,i)=>v+b[i]),sub=(a,b)=>a.map((v,i)=>v-b[i]),mul=(a,k)=>a.map(v=>v*k),dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],len=a=>Math.hypot(...a),norm=a=>mul(a,1/(len(a)||1)),clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const at=(lon,lat)=>[Math.sin(lon)*Math.cos(lat),Math.sin(lat),Math.cos(lon)*Math.cos(lat)];
+const angle=(a,b)=>Math.acos(clamp(dot(a,b),-1,1));
+function frame(n){let e=cross([0,1,0],n);if(len(e)<.001)e=cross([0,0,1],n);e=norm(e);return {n,e,u:norm(cross(n,e))}}
+// Surface navigation: the tangent at a that points to b, and the point reached by walking dist from n on a bearing (0 = north).
+const toward=(a,b)=>norm(sub(b,mul(a,dot(a,b))));
+function offset(n,north,bearing,dist){const east=norm(cross(north,n)),t=add(mul(east,Math.sin(bearing)),mul(north,Math.cos(bearing)));return norm(add(mul(n,Math.cos(dist)),mul(t,Math.sin(dist))))}
+const rng=seed=>{let v=seed;return()=>{v=(Math.imul(v,1664525)+1013904223)>>>0;return v/4294967296}};
+const SITES=[
+ {id:'cafe',lon:-.36,lat:.29,name:'코스모 커피',type:'hub',color:'#e8ecfa',roof:'#57d6c9',w:1.52,d:1.1,h:.79},
+ {id:'books',lon:.39,lat:.30,name:'별빛 도서관',type:'dome',color:'#b9a5ff',roof:'#5d4bb3',w:1.35,d:1,h:.78,neighbor:'사서 곰 루나',fur:'#e9d9b8',scarf:'#8f6bff'},
+ {id:'store',lon:-.86,lat:.82,name:'보급 창고',type:'module',color:'#d9dcec',roof:'#f2a65a',w:1.3,d:.95,h:.76,neighbor:'창고지기 곰 볼트',fur:'#8a6248',scarf:'#f2a65a'},
+ {id:'laundry',lon:.93,lat:.90,name:'산소 정원',type:'dome',color:'#8fe3a6',roof:'#3f8f6a',w:1.3,d:.95,h:.82,neighbor:'정원사 곰 모스',fur:'#f3efe6',scarf:'#4fc27a'},
+ {id:'pavilion',lon:1.73,lat:-.06,name:'전망 데크',type:'deck',color:'#c9d0e6',roof:'#6f7bb8',w:1.3,d:1.05,h:.8,neighbor:'관측사 곰 오리온',fur:'#5e5a6e',scarf:'#ffd84d'},
+ {id:'home4',lon:-.80,lat:-.40,name:'로봇 공방',type:'module',color:'#cfd6ea',roof:'#e0637a',w:1.2,d:.90,h:.70,neighbor:'수리공 곰 너트',fur:'#d9a066',scarf:'#e0637a'},
+ {id:'home5',lon:.72,lat:-.36,name:'수면 캡슐',type:'dome',color:'#9fd0ff',roof:'#3f6fb3',w:1.12,d:.86,h:.69,neighbor:'졸린 곰 코코',fur:'#f0b7c4',scarf:'#63b3ff'},
+ {id:'home1',lon:-1.75,lat:.05,name:'연구동',type:'module',color:'#d5d9ea',roof:'#7a86c9',w:1.3,d:1,h:.75},
+ {id:'home2',lon:2.82,lat:.56,name:'통신 기지',type:'dome',color:'#ffd9a0',roof:'#b3773f',w:1.25,d:.98,h:.74},
+ {id:'home3',lon:-2.65,lat:-.61,name:'격납고',type:'module',color:'#c2c8dc',roof:'#59c2d6',w:1.2,d:1,h:.75}
+].map(s=>({...s,n:at(s.lon,s.lat),door:at(s.lon,s.lat-1.32/R)}));
+const ORDERS=SITES.slice(1,1+CUPS),CAFE=SITES[0];
+function newGame(seed=20261005){const n=at(-.13,-.025),north=frame(n).u;return {n,north,facing:0,time:0,moving:false,status:'ready',carrying:0,picked:false,done:[],target:'cafe',locale:'ko',message:'카페 앞에서 커피를 받아 보세요.',messageTime:8,steps:0,round:1,
+ hearts:HEARTS,invuln:0,flash:0,seed:seed>>>0,cats:[],catTimer:2,ufo:{n:offset(n,north,0,1.2),timer:UFO.interval,phase:0},stars:[],fx:[],grade:0};}
+function rnd(s){s.seed=(Math.imul(s.seed,1664525)+1013904223)>>>0;return s.seed/4294967296}
+function start(s){if(s.status==='ready'||s.status==='paused')s.status='playing'}
+function pause(s){if(s.status==='playing')s.status='paused';else if(s.status==='paused')s.status='playing'}
+function target(s){return SITES.find(x=>x.id===s.target)||CAFE}
+// The six bear friends only come outside once the coffee has been picked up.
+function nearest(s){const a=[CAFE,...(s.picked?ORDERS:[])].map(site=>({site,d:angle(s.n,site.door)})).sort((a,b)=>a.d-b.d)[0];return a.d<.205?a.site:null}
+function nextTarget(s){const left=ORDERS.filter(o=>!s.done.includes(o.id));return left.length?left.sort((a,b)=>angle(s.n,a.door)-angle(s.n,b.door))[0].id:'cafe'}
+function announce(s,m){s.message=m;s.messageTime=5}
+function interact(s){
+ if(s.status!=='playing')return false;const site=nearest(s);
+ if(!site){announce(s,s.picked?'안내 화살표를 따라 곰 친구 앞으로 다가가세요.':'먼저 카페에서 커피를 받아 주세요.');return false}
+ if(site.id==='cafe'){
+  if(!s.picked){s.picked=true;s.carrying=CUPS;s.target=nextTarget(s);announce(s,'커피 여섯 잔 준비 완료! 곰 친구들이 기다려요.');return true}
+  if(s.done.length<CUPS){announce(s,'아직 '+s.carrying+'잔 남았어요. 곰 친구들에게 전해 주세요.');return false}
+  s.status='won';s.grade=s.hearts;announce(s,'배달 평가 완료!');return true;
+ }
+ if(s.done.includes(site.id)){announce(s,'이미 배달했어요. 다음 곰 친구를 찾아보세요.');return false}
+ s.carrying--;s.done.push(site.id);s.target=nextTarget(s);
+ announce(s,s.done.length===CUPS?'여섯 잔 모두 배달! 카페로 돌아가 평가를 받으세요.':site.neighbor+' · “고마워, 덕분에 살았어!”');
+ return true;
+}
+const blocked=n=>SITES.some(b=>angle(n,b.n)<Math.max(b.w,b.d)/(2*R)+.033);
+function hurt(s,cause){
+ if(s.status!=='playing'||s.invuln>0)return false;s.hearts--;s.invuln=1.5;s.flash=.5;
+ if(s.hearts<=0){s.hearts=0;s.status='lost'}
+ announce(s,(cause==='cat'?'펑! 외계 고양이가 터졌어요.':'별똥별에 맞았어요!')+' 생명 -1');return true;
+}
+// Alien cats: stroll toward the player, arm a 3 second fuse once close, then charge. A charging cat keeps
+// speeding up but can barely steer; it explodes when the fuse runs out or the moment it reaches the player.
+function stepCats(s,dt){
+ if(s.cats.length<CAT.max){s.catTimer-=dt;if(s.catTimer<=0){s.catTimer=CAT.respawn;let n;do n=offset(s.n,s.north,rnd(s)*TAU,.8+rnd(s)*.3);while(blocked(n));s.cats.push({n,fuse:-1,dir:toward(n,s.n)})}}
+ for(const c of s.cats){
+  const d=angle(c.n,s.n),want=d>.02?toward(c.n,s.n):c.dir;let speed=CAT.slow;
+  if(c.fuse<0){if(d>1.7){c.gone=true;continue}if(d<CAT.trigger)c.fuse=0;c.dir=want}
+  else{c.fuse+=dt;speed+=CAT.accel*c.fuse;const a=clamp(Math.atan2(dot(cross(c.dir,want),c.n),dot(c.dir,want)),-CAT.turn*dt,CAT.turn*dt);c.dir=norm(add(mul(c.dir,Math.cos(a)),mul(cross(c.n,c.dir),Math.sin(a))))}
+  if(c.fuse>=0||d>.05)for(const k of[0,1.6,-1.6]){const next=norm(add(c.n,mul(norm(add(c.dir,mul(cross(c.n,c.dir),k))),dt*speed)));if(!blocked(next)){c.n=next;break}}
+  c.dir=norm(sub(c.dir,mul(c.n,dot(c.dir,c.n))));
+  const gap=angle(c.n,s.n);if(c.fuse>=CAT.fuse||c.fuse>=0&&gap<CAT.touch){s.fx.push({n:c.n,t:0,life:.6,size:CAT.blast});if(gap<CAT.blast)hurt(s,'cat');c.gone=true}
+ }
+ s.cats=s.cats.filter(c=>!c.gone);
+}
+// UFO: hovers north of the player and drops four stars on random nearby spots, each previewed by a ground marker.
+function stepUfo(s,dt){
+ const u=s.ufo;u.phase+=dt;const goal=offset(s.n,s.north,Math.sin(u.phase*.5)*.9,.5),d=angle(u.n,goal);
+ if(d>.01)u.n=norm(add(u.n,mul(toward(u.n,goal),Math.min(d,dt*UFO.speed))));
+ u.timer-=dt;if(u.timer<=0){u.timer=UFO.interval;for(let i=0;i<UFO.stars;i++)s.stars.push({n:offset(s.n,s.north,rnd(s)*TAU,.05+Math.sqrt(rnd(s))*UFO.spread),from:u.n,t:0,life:UFO.warn+i*UFO.gap})}
+ for(const st of s.stars){st.t+=dt;if(st.t>=st.life){s.fx.push({n:st.n,t:0,life:.45,size:UFO.radius});if(angle(st.n,s.n)<UFO.radius)hurt(s,'star')}}
+ s.stars=s.stars.filter(st=>st.t<st.life);
+}
+function step(s,dt,input={}){
+ if(s.status!=='playing')return;dt=clamp(dt,0,.05);s.time+=dt;s.messageTime=Math.max(0,s.messageTime-dt);s.invuln=Math.max(0,s.invuln-dt);s.flash=Math.max(0,s.flash-dt);
+ for(const f of s.fx)f.t+=dt;s.fx=s.fx.filter(f=>f.t<f.life);
+ let x=input.x||0,y=input.y||0;const l=Math.hypot(x,y);if(l>1){x/=l;y/=l}s.moving=!!(x||y);
+ if(s.moving){
+  const east=norm(cross(s.north,s.n)),v=add(mul(east,x),mul(s.north,-y)),next=norm(add(s.n,mul(v,dt*.37)));
+  if(!blocked(next)){s.n=next;s.north=norm(sub(s.north,mul(next,dot(s.north,next))));s.facing=Math.atan2(x,-y);s.steps+=dt*3}
+ }
+ stepCats(s,dt);stepUfo(s,dt);
+}
+function chooseTarget(s,id){if(id==='cafe'||s.picked&&ORDERS.some(o=>o.id===id&&!s.done.includes(id)))s.target=id}
+// Geometry in true three-dimensional world coordinates. Canvas is the raster target.
+const LIGHT=norm([-1,2,3]);
+const RGB=new Map(),rgb=h=>{let a=RGB.get(h);if(!a)RGB.set(h,a=h.slice(1).match(/../g).map(x=>parseInt(x,16)));return a},hex=a=>'#'+a.map(v=>Math.round(clamp(v,0,255)).toString(16).padStart(2,'0')).join('');
+const shade=(h,k)=>hex(rgb(h).map(v=>v*k)),mix=(a,b,k)=>{const B=rgb(b);return hex(rgb(a).map((v,i)=>v+(B[i]-v)*k))};
+// Final colour of a polygon: brightness k, then gamma lifted so the mid-tones glow against the dark sky.
+const CURVE=Array.from({length:256},(_,i)=>Math.round(255*Math.pow(i/255,1/GAMMA)).toString(16).padStart(2,'0'));
+const tone=(h,k=1)=>{const a=rgb(h);return '#'+CURVE[Math.min(255,a[0]*k|0)]+CURVE[Math.min(255,a[1]*k|0)]+CURVE[Math.min(255,a[2]*k|0)]};
+// Diagonals keep the normal stable for the collapsed quads at a sphere's poles.
+function light(pts){const a=pts[0],b=pts[2],q=pts.length>3,c=q?pts[1]:a,d=q?pts[3]:pts[1],ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=d[0]-c[0],vy=d[1]-c[1],vz=d[2]-c[2],nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;return Math.abs(nx*LIGHT[0]+ny*LIGHT[1]+nz*LIGHT[2])/(Math.hypot(nx,ny,nz)||1)}
+// A renderable polygon. The unit vector toward its centre lets the renderer skip the far side of the planet cheaply.
+function mkPoly(pts,color,lit,layer){let x=0,y=0,z=0;for(const p of pts){x+=p[0];y+=p[1];z+=p[2]}const l=Math.hypot(x,y,z)||1;return {pts,color:color[0]==='#'?tone(color,lit?.76+.24*light(pts):1):color,layer,nx:x/l,ny:y/l,nz:z/l}}
+// Ellipsoid aligned to a local frame (e = right, n = up, u = back). j0 skips lower rings to make a dome.
+const UNIT={};
+function unit(seg,rings){const key=seg+'/'+rings;if(!UNIT[key]){const t=[];for(let j=0;j<=rings;j++)for(let i=0;i<=seg;i++)t.push(at(i/seg*TAU,-Math.PI/2+j/rings*Math.PI));UNIT[key]=t}return UNIT[key]}
+function sphere(emit,f,c,r,color,sx=1,sy=1,sz=1,seg=12,rings=8,j0=0){
+ const e=mul(f.e,r*sx),n=mul(f.n,r*sy),u=mul(f.u,r*sz),v=unit(seg,rings).map(q=>[c[0]+e[0]*q[0]+n[0]*q[1]+u[0]*q[2],c[1]+e[1]*q[0]+n[1]*q[1]+u[1]*q[2],c[2]+e[2]*q[0]+n[2]*q[1]+u[2]*q[2]]),row=seg+1;
+ for(let j=j0;j<rings;j++)for(let i=0;i<seg;i++){const k=j*row+i;emit([v[k],v[k+1],v[k+row+1],v[k+row]],color)}
+}
+const SKY=(()=>{const r=rng(88),a=[];for(let i=0;i<170;i++)a.push({x:r()*W,y:r()*H,r:1+r()*2.2,p:r()*TAU,s:.6+r()*1.8,c:['#ffffff','#cfe3ff','#ffe9b8','#d9c7ff'][Math.floor(r()*4)]});return a})();
+let sceneCache=null;
+function makeScene(){
+ const polys=[];let currentLayer=0;
+ const poly=(pts,color,lit=true)=>polys.push(mkPoly(pts,color,lit,currentLayer));
+ const local=(n,fn)=>{const f=frame(n);return fn((x,y,z)=>add(mul(n,R+y),add(mul(f.e,x),mul(f.u,z))),f)};
+ function box(p,x,y,z,w,h,d,color){const q=[p(x-w/2,y,z-d/2),p(x+w/2,y,z-d/2),p(x+w/2,y+h,z-d/2),p(x-w/2,y+h,z-d/2),p(x-w/2,y,z+d/2),p(x+w/2,y,z+d/2),p(x+w/2,y+h,z+d/2),p(x-w/2,y+h,z+d/2)];[[0,1,2,3],[1,5,6,2],[4,7,6,5],[0,3,7,4],[3,2,6,7]].forEach(ids=>poly(ids.map(i=>q[i]),color))}
+ const ball=(f,c,r,color,sx,sy,sz,seg,rings,j0)=>sphere(poly,f,c,r,color,sx,sy,sz,seg,rings,j0);
+ function spike(p,x,y,z,w,h,color,lean=0){const b=[p(x-w,y,z-w),p(x+w,y,z-w),p(x+w,y,z+w),p(x-w,y,z+w)],t=p(x+lean,y+h,z);for(let i=0;i<4;i++)poly([b[i],b[(i+1)%4],t],shade(color,.8+i*.12))}
+ function disc(n,r,color,y){const f=frame(n),pts=[];for(let i=0;i<22;i++){const a=i/22*TAU;pts.push(add(mul(n,R+y),add(mul(f.e,Math.cos(a)*r),mul(f.u,Math.sin(a)*r))))}poly(pts,color,false)}
+ // The globe provides both the curved horizon and foreground occlusion. Layered sine noise paints
+ // soft highlands and dark plains, and the poles carry pale ice caps.
+ const rand=rng(531),NJ=36,NI=72;
+ for(let j=0;j<NJ;j++)for(let i=0;i<NI;i++){const a=i/NI*TAU,b=-Math.PI/2+j/NJ*Math.PI,da=TAU/NI,db=Math.PI/NJ,m=at(a+da/2,b+db/2);
+  const f=Math.sin(m[0]*3.1+1.3)*Math.sin(m[1]*2.7+.5)+.5*Math.sin(m[2]*6.3+m[0]*4.1)+.25*Math.sin(m[1]*11+m[2]*9);
+  let color=mix('#666a94','#a3a6cf',clamp(.5+f/2.6,0,1));if(Math.abs(m[1])>.88)color=mix(color,'#e9edff',clamp((Math.abs(m[1])-.88)*7,0,.85));
+  poly([at(a,b),at(a+da,b),at(a+da,b+db),at(a,b+db)].map(n=>mul(n,R)),shade(color,.985+rand()*.03),false)}
+ // Craters sit between the ground and the walkways.
+ currentLayer=.5;
+ for(let i=0;i<40;i++){const n=at((rand()-.5)*TAU,Math.asin((rand()-.5)*1.9)),r=.18+rand()*.34;if(SITES.some(s=>angle(n,s.n)<.3))continue;disc(n,r,'#b0b3d6',.015);disc(n,r*.88,'#5c5f88',.02);disc(n,r*.62,'#676a93',.025);disc(n,r*.2,'#7a7da6',.03)}
+ currentLayer=1;
+ function road(a,b,width=.13,color='#454b70',y=.025){const count=Math.ceil(angle(a,b)*50);for(let i=0;i<count;i++){const n1=norm(add(mul(a,1-i/count),mul(b,i/count))),n2=norm(add(mul(a,1-(i+1)/count),mul(b,(i+1)/count))),side=norm(cross(n1,n2));poly([add(mul(n1,R+y),mul(side,-width)),add(mul(n1,R+y),mul(side,width)),add(mul(n2,R+y),mul(side,width)),add(mul(n2,R+y),mul(side,-width))],color,false)}}
+ const site=id=>SITES.find(x=>x.id===id);
+ const routes=[[CAFE.door,ORDERS[0].door],[CAFE.door,at(-.65,.05),at(-1.12,.35),at(-1.15,.58),ORDERS[1].door],[ORDERS[1].door,ORDERS[2].door],[ORDERS[2].door,at(1.3,.35),at(1.35,0),at(1.4,-.35),ORDERS[3].door],[CAFE.door,at(-.13,-.025)],[site('home4').door,CAFE.door],[site('home5').door,ORDERS[0].door],[site('home2').door,site('home3').door]];
+ for(const route of routes)for(let i=1;i<route.length;i++)road(route[i-1],route[i],.17);
+ // A plasma river wraps the lower part of the world.
+ const river=(w,color,y)=>{for(let i=0;i<120;i++){const a=i/120*TAU,b=(i+1)/120*TAU;road(at(a,-.72+Math.sin(a*3)*.1),at(b,-.72+Math.sin(b*3)*.1),w,color,y)}};
+ river(.2,'#5a3fc4');
+ // Glowing guide strips run down the middle of every walkway.
+ currentLayer=1.2;
+ for(const route of routes)for(let i=1;i<route.length;i++)road(route[i-1],route[i],.024,'#67e8f9',.03);
+ river(.07,'#c4a7ff',.03);
+ currentLayer=2;
+ const glow='#8ef0ff',hull='#565c7c',dark='#333957';
+ for(const s of SITES)local(s.n,(p,f)=>{
+  const front=-s.d/2-.014;
+  box(p,0,.01,0,s.w+.24,.09,s.d+.2,hull);
+  if(s.type==='deck'){
+   box(p,0,.1,0,s.w,.1,s.d,'#8087a8');for(const x of[-.52,.52])for(const z of[-.4,.4])box(p,x,.2,z,.07,s.h,.07,s.color);
+   box(p,0,.2+s.h,0,s.w+.2,.06,s.d+.2,s.roof);ball(f,p(0,.26+s.h,0),.32,glow,1,.6,1,16,10,5);
+   box(p,.3,.2,.12,.08,.26,.08,'#9aa3c2');ball(f,p(.3,.52,.1),.1,'#e6ebff',1,1,1.7);
+  }else if(s.type==='dome'){
+   const r=Math.min(s.w,s.d)/2;
+   box(p,0,.1,0,s.w,.2,s.d,'#8d94b5');ball(f,p(0,.3,0),r,s.color,s.w/(2*r)*.95,s.h/r*.85,.95,20,12,6);
+   box(p,0,.3,0,s.w+.04,.04,s.d+.04,s.roof);
+   box(p,0,.1,front,.32,.4,.1,dark);box(p,0,.15,front-.055,.2,.28,.012,glow);
+   box(p,0,.3+s.h*.82,0,.03,.3,.03,'#c9d0e6');ball(f,p(0,.62+s.h*.82,0),.05,'#ff6b6b');
+  }else{
+   box(p,0,.1,0,s.w,s.h,s.d,s.color);ball(f,p(0,.1+s.h,0),s.d/2,s.roof,s.w/s.d,s.type==='hub'?.75:.45,1,20,12,6);
+   box(p,0,.1,front,.27,s.h*.72,.03,dark);box(p,0,.16,front-.02,.17,s.h*.5,.012,glow);
+   for(const x of[-s.w*.31,s.w*.31])box(p,x,.1+s.h*.42,front,.26,.22,.02,glow);
+   for(const x of[-s.w*.48,s.w*.48])box(p,x,.1,front,.06,s.h,.04,s.roof);
+   box(p,0,.085,-s.d*.65,.55,.06,.3,'#6b7194');
+   if(s.type==='hub'){box(p,-.87,.1,-.31,.19,.4,.19,'#8087a8');box(p,-.87,.51,-.31,.25,.07,.25,'#e6ebff');ball(f,p(-.87,.75,-.31),.17,'#c98b5b');ball(f,p(-.87,.75,-.31),.25,'#ffd84d',1,.08,1,16,4)}
+   else{box(p,s.w*.3,.1+s.h,.1,.03,.55,.03,'#c9d0e6');ball(f,p(s.w*.3,.68+s.h,.1),.045,'#ff6b6b');ball(f,p(-s.w*.6,.24,.26),.19,'#aab3cc',1,1.15,1);box(p,-s.w*.6,.42,.26,.12,.06,.12,s.roof)}
+  }
+ });
+ // Crystal clusters and moon rocks. Fixed seed, reproducible world.
+ const gems=['#6ff2ff','#c08bff','#ff8fd6','#8cffb5'];
+ for(let i=0;i<60;i++){
+  const lon=(rand()-.5)*TAU,lat=Math.asin((rand()-.5)*1.85),n=at(lon,lat),tall=.4+rand()*.45,lean=(rand()-.5)*.2;
+  if(angle(n,at(-.13,-.025))<.3||SITES.some(s=>angle(n,s.n)<.27||angle(n,s.door)<.25))continue;
+  local(n,(p,f)=>{if(i%3===0){ball(f,p(0,.07,0),.22,'#6c6f93',1,.6,.8,10,6);ball(f,p(.2,.04,.08),.12,'#8185ab',1,.7,1,8,6)}else{const c=gems[i%4];spike(p,0,0,0,.09,tall,c,lean);spike(p,.15,0,.06,.06,tall*.55,shade(c,.85),.08);spike(p,-.12,0,-.07,.05,tall*.4,shade(c,1.1),-.07)}});
+ }
+ // Cargo crates, a rover, a beacon and a parked rocket.
+ local(at(-.65,.14),p=>{box(p,-.2,0,0,.26,.24,.24,'#f2a65a');box(p,.1,0,.03,.24,.2,.22,'#63b3ff');box(p,-.06,.24,.01,.2,.18,.2,'#e0637a')});
+ local(at(.48,.75),(p,f)=>{box(p,0,.12,0,.5,.14,.3,'#e6ebff');box(p,.08,.26,0,.2,.12,.22,glow);for(const x of[-.2,.2])for(const z of[-.17,.17])ball(f,p(x,.09,z),.09,dark,.6,1,1,8,6);box(p,-.18,.26,0,.025,.25,.025,'#c9d0e6');ball(f,p(-.18,.54,0),.09,'#ffd84d',1,.35,1,10,4)});
+ local(at(.92,.53),(p,f)=>{box(p,0,.02,0,.16,.06,.16,hull);box(p,0,.08,0,.04,.7,.04,'#c9d0e6');ball(f,p(0,.84,0),.1,'#ff8fd6')});
+ local(at(2.25,-.35),(p,f)=>{ball(f,p(0,.78,0),.26,'#e9ecf7',1,2.6,1,16,12);spike(p,0,1.28,0,.13,.42,'#ff6b6b');for(const x of[-.3,.3])box(p,x,.04,0,.12,.42,.06,'#ff6b6b');box(p,0,.04,.3,.06,.42,.12,'#ff6b6b');ball(f,p(0,.95,-.23),.075,glow)});
+ return {polys};
+}
+function camera(s){const eye=mul(norm(add(s.n,mul(s.north,.26))),EYE),f=norm(mul(eye,-1)),right=norm(cross(f,s.north)),up=norm(cross(right,f));return {eye,f,right,up,project(v){const d=sub(v,eye),z=dot(d,f);return {x:W/2+dot(d,right)*980/z,y:433-dot(d,up)*980/z,z}},eyeN:norm(eye)}}
+function heart(c,x,y,r,color){c.beginPath();c.moveTo(x,y+r*.9);c.bezierCurveTo(x-r*1.6,y-r*.2,x-r*.8,y-r*1.3,x,y-r*.45);c.bezierCurveTo(x+r*.8,y-r*1.3,x+r*1.6,y-r*.2,x,y+r*.9);c.closePath();c.fillStyle=color;c.fill()}
+function star2d(c,x,y,r,rot,color){c.beginPath();for(let i=0;i<10;i++){const a=rot+i/10*TAU,q=i%2?r*.45:r;c.lineTo(x+Math.sin(a)*q,y-Math.cos(a)*q)}c.closePath();c.fillStyle=color;c.fill()}
+// Teddy bear. It faces south and looks up a little so the follow camera can see its face.
+// ball(f,centre,r,color,...) adds an ellipsoid; phase is the walk cycle, or null when standing still.
+function bear(ball,n,f,fur,scarf,phase){
+ const walking=phase!=null,bob=walking?Math.sin(phase*TAU)*.02:0,sw=walking?Math.sin(phase*TAU)*.065:0,pale=mix(fur,'#fff4dc',.6),ink='#2b2233';
+ const K=1.3,pos=(x,y,z)=>add(mul(n,R+y*K+bob),add(mul(f.e,x*K),mul(f.u,z*K))),b=(x,y,z,r,color,sx,sy,sz,seg,rings)=>ball(f,pos(x,y,z),r*K,color,sx,sy,sz,seg,rings);
+ b(-.1,.07,sw,.085,fur,.9,.8,1.3,7,5);b(.1,.07,-sw,.085,fur,.9,.8,1.3,7,5);
+ b(0,.27,0,.2,fur,1,1.15,.9,12,7);b(0,.28,-.1,.13,pale,1,1.1,.6,8,5);
+ b(-.21,.31,-.04,.075,fur,.8,1.2,.9,7,5);b(.21,.31,-.04,.075,fur,.8,1.2,.9,7,5);
+ b(0,.45,0,.16,scarf,1,.32,1,12,3);
+ b(0,.6,0,.21,fur,1.05,.95,1,14,8);
+ for(const x of[-.17,.17]){b(x,.76,.06,.085,fur,1,1,.7,8,5);b(x,.78,.03,.048,pale,1,1,.6,6,4)}
+ b(0,.715,-.125,.09,pale,1.1,.8,.9,8,5);b(0,.765,-.19,.034,ink,1.2,.8,1,6,4);
+ for(const x of[-.085,.085])b(x,.785,-.07,.032,ink,1,1,1,6,4);
+ return pos;
+}
+function cup(ball,flat,f,base,scale=1){const top=add(base,mul(f.n,.135*scale));for(let a=0;a<8;a++){const k=a/8*TAU,k2=(a+1)/8*TAU,q=(c0,ang,r)=>add(c0,add(mul(f.e,Math.cos(ang)*r*scale),mul(f.u,Math.sin(ang)*r*scale)));flat([q(base,k,.048),q(base,k2,.048),q(top,k2,.058),q(top,k,.058)],a%2?'#f0e7d1':'#e0d2b2')}ball(f,add(top,mul(f.n,.011)),.058*scale,'#805a40',1,.17,1,8,3)}
+// The bear friends never move, so each one is built once (again when it receives its cup).
+const npcCache={};
+function npcPolys(o,served){const key=o.id+served;if(!npcCache[key]){const out=[],f=frame(o.door),ball=(f,c,r,color,...rest)=>sphere((pts,col)=>out.push(mkPoly(pts,col,true,2)),f,c,r,color,...rest),pos=bear(ball,o.door,f,o.fur,o.scarf,null);if(served)cup(ball,(pts,col)=>out.push(mkPoly(pts,col,false,2)),f,pos(.24,.3,-.1),.9);npcCache[key]=out}return npcCache[key]}
+function draw(c,s,{overlay=true}={}){
+ const scene=sceneCache||(sceneCache=makeScene());const cam=camera(s),font=(weight,size)=>c.font=weight+' '+size+'px "Workshop", "Noto Sans KR", sans-serif',rim=R/Math.sqrt(EYE*EYE-R*R)*980;c.save();c.clearRect(0,0,W,H);
+ // Deep space: twinkling stars, a ringed planet, a small moon and the atmosphere glow around our planet.
+ const bg=c.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#0b1030');bg.addColorStop(1,'#2b1c5e');c.fillStyle=bg;c.fillRect(0,0,W,H);
+ for(const st of SKY){c.globalAlpha=.4+.6*Math.abs(Math.sin(s.time*st.s+st.p));c.fillStyle=st.c;c.fillRect(st.x,st.y,st.r,st.r)}c.globalAlpha=1;
+ c.fillStyle='#f0b585';c.beginPath();c.arc(84,690,40,0,TAU);c.fill();c.fillStyle='#d6905f';c.beginPath();c.ellipse(84,701,36,13,0,0,TAU);c.fill();c.strokeStyle='#ffe9c4';c.lineWidth=5;c.beginPath();c.ellipse(84,690,70,14,-.35,0,TAU);c.stroke();
+ c.fillStyle='#dfe5f5';c.beginPath();c.arc(1120,700,19,0,TAU);c.fill();c.fillStyle='#b7c0d8';c.beginPath();c.arc(1114,695,5,0,TAU);c.arc(1127,707,4,0,TAU);c.fill();
+ const halo=c.createRadialGradient(600,433,rim-12,600,433,rim+58);halo.addColorStop(0,'#8fc0ff99');halo.addColorStop(1,'#8fc0ff00');c.fillStyle=halo;c.beginPath();c.arc(600,433,rim+58,0,TAU);c.fill();
+ // A true circle under the mesh keeps the horizon perfectly round.
+ c.fillStyle=tone('#7f82ab');c.beginPath();c.arc(600,433,rim-.5,0,TAU);c.fill();
+ const lists=[scene.polys],dyn=[],labels=[];let L=2;lists.push(dyn);
+ const seen=(n,k=.25)=>dot(n,cam.eyeN)>k;
+ const dynPoly=(pts,color,lit=false)=>dyn.push(mkPoly(pts,color,lit,L)),round=(pts,col)=>dyn.push(mkPoly(pts,col,true,L));
+ const ball=(f,center,r,color,sx,sy,sz,seg,rings,j0)=>sphere(round,f,center,r,color,sx,sy,sz,seg,rings,j0);
+ // Flat ring on the ground; radii are surface radians. Used for blast previews and shadows.
+ function ring(n,r0,r1,color){const f=frame(n),pt=(a,r)=>add(mul(n,R+.045),add(mul(f.e,Math.cos(a)*r*R),mul(f.u,Math.sin(a)*r*R)));for(let i=0;i<20;i++){const a=i/20*TAU,b=(i+1)/20*TAU;dynPoly([pt(a,r0),pt(b,r0),pt(b,r1),pt(a,r1)],color)}}
+ if(s.picked)for(const o of ORDERS){if(!seen(o.door))continue;const served=s.done.includes(o.id);lists.push(npcPolys(o,served));if(!served)labels.push({pos:add(mul(o.door,R+.9),mul(frame(o.door).u,.55)),n:o.door,id:o.id})}
+ if(!(s.invuln>0&&Math.floor(s.time*12)%2)){
+  const f={n:s.n,e:norm(cross(s.north,s.n)),u:s.north},pos=bear(ball,s.n,f,'#b9814f','#ff5d5d',s.moving?s.steps:null);
+  if(s.carrying){const rows=Math.ceil(s.carrying/2);dynPoly([pos(-.2,.29,-.13),pos(.2,.29,-.13),pos(.2,.29,-.15-rows*.16),pos(-.2,.29,-.15-rows*.16)],'#8f9ac4');for(let i=0;i<s.carrying;i++)cup(ball,dynPoly,f,pos((i%2-.5)*.16,.3,-.23-Math.floor(i/2)*.16))}
+ }
+ // Alien cats face the way they run and fade from green to red while the fuse burns.
+ s.cats.forEach((cat,i)=>{
+  const n=cat.n;if(!seen(n))return;const k=cat.fuse<0?0:clamp(cat.fuse/CAT.fuse,0,1),col=mix('#58e39a','#ff2222',k),u=mul(cat.dir,-1),f={n,e:norm(cross(u,n)),u};
+  const pulse=1+Math.sin(s.time*(8+k*26))*.1*k,hop=Math.abs(Math.sin(s.time*(9+k*10)+i*2))*.05,K=1.4,b=(x,y,z,r,color,sx,sy,sz,seg,rings)=>ball(f,add(mul(n,R+y*K+hop),add(mul(f.e,x*K),mul(f.u,z*K))),r*K,color,sx,sy,sz,seg,rings);
+  if(k>0){L=1.5;ring(n,CAT.blast*.9,CAT.blast,'rgba(255,70,70,'+(.35+.5*k)+')');ring(n,0,CAT.blast*.9,'rgba(255,70,70,'+(.08+.3*k)+')');L=2}
+  b(0,.15,.08,.15*pulse,col,.9,.8,1.3,10,6);b(0,.26,.32,.045,shade(col,.8),.7,2,.7,6,4);
+  b(0,.3,-.12,.14*pulse,col,1,1,1,10,6);
+  for(const x of[-.1,.1]){b(x,.42,-.08,.06*pulse,shade(col,.75),.7,1.7,.6,6,4);b(x*.6,.4,-.2,.028,'#fffbe0',1,1,1,5,3)}
+  b(0,.44,-.16,.028,'#fffbe0',1,1,1,5,3);
+ });
+ // Star strike previews: the marker fills up and turns red right before the star lands.
+ L=1.5;for(const st of s.stars){if(!seen(st.n))continue;const k=st.t/st.life,hot=k>.6,blink=st.life-st.t<.4&&Math.floor(s.time*14)%2;ring(st.n,UFO.radius*.86,UFO.radius,hot?'#ff5a3c':'#ffd84d');if(!blink)ring(st.n,0,UFO.radius*.86*k,hot?'rgba(255,90,60,.7)':'rgba(255,216,77,.6)')}
+ if(seen(s.ufo.n,.1)){const u=s.ufo,f=frame(u.n),c0=mul(u.n,R+UFO.height+Math.sin(s.time*2)*.06),charging=u.timer<.8;
+  L=1.4;ring(u.n,0,.075,'rgba(0,0,0,.28)');L=3;
+  ball(f,c0,.5,'#aab3cc',1,.2,1,20,6);ball(f,add(c0,mul(u.n,.06)),.25,'#7fe7ff',1,.9,1,14,10,5);
+  for(let i=0;i<6;i++){const a=i/6*TAU+s.time;ball(f,add(c0,add(mul(f.e,Math.cos(a)*.4),add(mul(f.u,Math.sin(a)*.4),mul(u.n,.05)))),.055,charging?'#ff5252':i%2?'#ffd84d':'#ff8fd6',1,1,1,8,6)}}
+ L=2;labels.push({pos:mul(CAFE.door,R+.85),n:CAFE.door,id:'cafe'});
+ // Cull, project and depth-sort. Written out with plain numbers because this runs for every polygon each frame.
+ const faces=[],[ex,ey,ez]=cam.eye,[fx,fy,fz]=cam.f,[rx,ry,rz]=cam.right,[ux,uy,uz]=cam.up,[nx,ny,nz]=cam.eyeN;
+ for(const list of lists)for(const p of list){if(p.nx*nx+p.ny*ny+p.nz*nz<(p.layer===0?.25:.29))continue;const m=p.pts.length,xy=new Array(m*2);let zs=0;for(let i=0;i<m;i++){const v=p.pts[i],dx=v[0]-ex,dy=v[1]-ey,dz=v[2]-ez,z=dx*fx+dy*fy+dz*fz,k=980/z;xy[i*2]=W/2+(dx*rx+dy*ry+dz*rz)*k;xy[i*2+1]=433-(dx*ux+dy*uy+dz*uz)*k;zs+=z}faces.push({xy,color:p.color,layer:p.layer,z:zs/m})}
+ faces.sort((a,b)=>a.layer-b.layer||b.z-a.z);
+ // Sunlit side and darkened limb, painted over the ground before anything that stands on it.
+ let shaded=false;const limb=()=>{shaded=true;c.save();c.beginPath();c.arc(600,433,rim,0,TAU);c.clip();const g=c.createRadialGradient(510,330,30,600,433,rim*1.02);g.addColorStop(0,'rgba(255,255,255,.16)');g.addColorStop(.5,'rgba(255,255,255,0)');g.addColorStop(.78,'rgba(14,10,48,0)');g.addColorStop(1,'rgba(14,10,48,.5)');c.fillStyle=g;c.fillRect(0,0,W,H);c.restore();c.strokeStyle='rgba(170,210,255,.55)';c.lineWidth=2;c.beginPath();c.arc(600,433,rim,0,TAU);c.stroke()};
+ for(const p of faces){if(!shaded&&p.layer>1.3)limb();const xy=p.xy;c.fillStyle=p.color;c.beginPath();c.moveTo(xy[0],xy[1]);for(let i=2;i<xy.length;i+=2)c.lineTo(xy[i],xy[i+1]);c.closePath();c.fill()}
+ if(!shaded)limb();
+ // Falling stars and explosions are drawn as screen-space sprites above the world.
+ for(const st of s.stars){const left=st.life-st.t;if(left>UFO.fall||!seen(st.n))continue;const q=1-left/UFO.fall,a=mul(st.from,R+UFO.height),b=mul(st.n,R+.1),p=cam.project(add(mul(a,1-q),mul(b,q))),p0=cam.project(add(mul(a,1-q*.6),mul(b,q*.6)));c.strokeStyle='rgba(255,236,150,.75)';c.lineWidth=6;c.lineCap='round';c.beginPath();c.moveTo(p0.x,p0.y);c.lineTo(p.x,p.y);c.stroke();star2d(c,p.x,p.y,17,s.time*9,'#fff3a6');star2d(c,p.x,p.y,9,s.time*9,'#ffffff')}
+ for(const f of s.fx){if(!seen(f.n))continue;const k=f.t/f.life,p=cam.project(mul(f.n,R+.2)),r=f.size*R*980/p.z*(.45+.75*k);c.globalAlpha=1-k;c.fillStyle='#ff9f43';c.beginPath();c.arc(p.x,p.y,r,0,TAU);c.fill();c.fillStyle='#fff3a6';c.beginPath();c.arc(p.x,p.y,r*.55,0,TAU);c.fill();for(let i=0;i<6;i++)star2d(c,p.x+Math.cos(i)*r*1.2,p.y+Math.sin(i*2.3)*r*1.2,7,i,'#ffffff')}c.globalAlpha=1;
+ // Delivery pins: the current target bounces, the other waiting bears get a small number.
+ for(const l of labels){if(dot(l.n,cam.eyeN)<.22)continue;const p=cam.project(l.pos);
+  if(l.id===s.target){const bounce=Math.sin(s.time*3)*3;c.fillStyle='#ff9f43';c.beginPath();c.moveTo(p.x,p.y+13+bounce);c.lineTo(p.x-8,p.y-1+bounce);c.lineTo(p.x+8,p.y-1+bounce);c.fill();c.beginPath();c.arc(p.x,p.y-14+bounce,15,0,TAU);c.fill();c.fillStyle='#1a1230';c.font='600 17px sans-serif';c.textAlign='center';c.fillText(l.id==='cafe'?'C':String(ORDERS.findIndex(o=>o.id===l.id)+1),p.x,p.y-8+bounce)
+  }else if(l.id!=='cafe'){c.fillStyle='#ffd9a8cc';c.beginPath();c.arc(p.x,p.y-8,10,0,TAU);c.fill();c.fillStyle='#1a1230';c.font='600 12px sans-serif';c.textAlign='center';c.fillText(String(ORDERS.findIndex(o=>o.id===l.id)+1),p.x,p.y-4)}}
+ c.textAlign='left';c.fillStyle='#9ef3ff';font(400,14);c.fillText('A LITTLE STATION, A WARM CUP',42,44);c.fillStyle='#ffffff';font(500,37);c.fillText(s.locale==='ko'?'코스모 커피 배달':'Cosmo Coffee Run',40,95);font(400,15);c.fillStyle='#b9c4f0';c.fillText('외계 고양이와 별똥별을 조심하세요.',43,126);
+ c.fillStyle='#141a33d9';c.strokeStyle='#3d4a80';c.lineWidth=1.5;c.beginPath();c.roundRect(933,30,227,128,8);c.fill();c.stroke();c.fillStyle='#ffffff';font(500,18);c.fillText('배달  '+s.done.length+' / '+CUPS,956,62);font(400,15);c.fillStyle='#dfe6ff';c.fillText('들고 있는 커피  '+s.carrying+'잔',956,92);c.fillText('생명',956,131);
+ for(let i=0;i<HEARTS;i++)heart(c,1022+i*38,125,13,i<s.hearts?'#ff4d6d':'#3d4a80');
+ // A compass uses actual spherical tangents, including targets beyond the horizon.
+ if(s.status!=='won'&&s.status!=='lost'){
+  const dest=target(s),delta=sub(dest.door,mul(s.n,dot(dest.door,s.n))),east=norm(cross(s.north,s.n));const a=Math.atan2(dot(delta,east),dot(delta,s.north));
+  c.save();c.translate(1100,212);c.fillStyle='#141a33d9';c.beginPath();c.arc(0,0,38,0,TAU);c.fill();c.stroke();c.rotate(a);c.fillStyle='#ff9f43';c.beginPath();c.moveTo(0,-26);c.lineTo(11,12);c.lineTo(0,5);c.lineTo(-11,12);c.closePath();c.fill();c.restore();
+  c.fillStyle='#dfe6ff';font(400,14);c.textAlign='center';c.fillText(dest.neighbor||'카페',1100,270);c.fillText(Math.round(angle(s.n,dest.door)*R*10)+' 걸음 거리',1100,293);
+ }
+ const near=nearest(s);if(s.status==='playing'&&near){c.textAlign='center';c.fillStyle='#2a3a8fe6';c.beginPath();c.roundRect(362,716,476,42,21);c.fill();c.fillStyle='#ffffff';font(400,17);c.fillText('E / Space  ·  '+(near.id==='cafe'?(!s.picked?'커피 받기':s.done.length===CUPS?'배달 평가 받기':'배달을 먼저 마치세요'):s.done.includes(near.id)?'인사 나누기':'커피 전하기'),600,743)}
+ c.textAlign='center';if(s.messageTime>0&&s.status==='playing'){c.fillStyle='#ffe9b8';font(400,15);c.fillText(s.message,600,783)}
+ if(s.flash>0&&s.status==='playing'){c.fillStyle='rgba(255,40,60,'+s.flash*.7+')';c.fillRect(0,0,W,H)}
+ if(overlay&&s.status==='lost'){
+  // Game over: one line only. The retry button is a real HTML button placed just below it.
+  c.fillStyle='#0b1030b3';c.fillRect(0,0,W,H);c.fillStyle='#10152ef2';c.strokeStyle='#3d4a80';c.lineWidth=1.5;c.beginPath();c.roundRect(300,292,600,236,14);c.fill();c.stroke();c.fillStyle='#ffffff';font(500,38);c.fillText('이런! 커피를 쏟았어요!',600,372);
+ }else if(overlay&&s.status!=='playing'){
+  const title={ready:'곰돌이의 우주 커피 배달',paused:'잠깐 쉬어 가요',won:'배달 평가  '+'★'.repeat(s.grade)+'☆'.repeat(HEARTS-s.grade)}[s.status];
+  const line={ready:'카페에서 커피 여섯 잔을 받아 여섯 곰 친구에게 전하고, 카페로 돌아와 평가를 받으세요.',paused:'계속하기를 누르면 우주 정거장으로 돌아갑니다.',won:['','아슬아슬했지만 해냈어요!','훌륭한 배달이었어요!','완벽한 배달! 한 번도 다치지 않았어요.'][s.grade]+'  ('+Math.round(s.time)+'초)'}[s.status];
+  c.fillStyle='#10152eee';c.strokeStyle='#3d4a80';c.lineWidth=1.5;c.beginPath();c.roundRect(238,270,724,282,12);c.fill();c.stroke();c.fillStyle='#ffffff';font(500,36);c.fillText(title,600,333);
+  c.fillStyle='#dfe6ff';font(400,17);c.fillText(line,600,378);
+  c.fillText(s.status==='won'?'남은 생명':'외계 고양이는 3초 안에 돌진해 폭발하고, UFO는 표시된 자리에 별 네 개를 떨어뜨려요.',600,412);
+  if(s.status==='won')for(let i=0;i<HEARTS;i++)heart(c,562+i*38,444,13,i<s.hearts?'#ff4d6d':'#3d4a80');else c.fillText('방향키 / WASD 이동  ·  E / Space 커피 받기·전하기',600,446);
+  c.fillStyle='#ff9f43';font(400,16);c.fillText('아래 시작 / 계속 버튼 · '+(s.status==='won'?'다시 도전하기':s.status==='paused'?'계속하기':'배달 시작'),600,504);
+ }c.restore();
+}
+function mount(canvas,onUpdate=()=>{}){
+ const fresh=()=>newGame(Date.now());
+ const c=canvas.getContext('2d');canvas.width=W;canvas.height=H;let s=fresh(),last=0,raf,keys=new Set(),pointer={x:0,y:0},alive=true;
+ const keydown=e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName))return;const k=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright','w','a','s','d','e',' '].includes(k)){e.preventDefault();if((k==='e'||k===' ')&&!e.repeat)interact(s);else keys.add(k)}};
+ const keyup=e=>keys.delete(e.key.toLowerCase());
+ const blur=()=>{keys.clear();pointer={x:0,y:0};if(s.status==='playing'){s.status='paused';onUpdate(s)}};
+ const visibility=()=>{if(document.hidden)blur()};
+ function loop(ms){if(!alive)return;const dt=last?(ms-last)/1000:0;last=ms;step(s,dt,{x:pointer.x+(keys.has('arrowright')||keys.has('d')?1:0)-(keys.has('arrowleft')||keys.has('a')?1:0),y:pointer.y+(keys.has('arrowdown')||keys.has('s')?1:0)-(keys.has('arrowup')||keys.has('w')?1:0)});draw(c,s);onUpdate(s);raf=requestAnimationFrame(loop)}
+ addEventListener('keydown',keydown);addEventListener('keyup',keyup);addEventListener('blur',blur);document.addEventListener('visibilitychange',visibility);raf=requestAnimationFrame(loop);
+ return {get state(){return s},start(){if(s.status==='won'||s.status==='lost'){const l=s.locale;s=fresh();s.locale=l}start(s)},pause(){pause(s)},reset(){const l=s.locale;s=fresh();s.locale=l;keys.clear();pointer={x:0,y:0}},interact(){interact(s)},locale(l){s.locale=l==='ko'?'ko':'en'},target(id){chooseTarget(s,id)},pointer(x,y){pointer={x,y}},destroy(){alive=false;cancelAnimationFrame(raf);removeEventListener('keydown',keydown);removeEventListener('keyup',keyup);removeEventListener('blur',blur);document.removeEventListener('visibilitychange',visibility)}};
+}
+return {W,H,R,CUPS,HEARTS,CAT,UFO,SITES,ORDERS,CAFE,newGame,start,pause,step,interact,hurt,nearest,target,chooseTarget,draw,mount,math:{add,sub,mul,dot,cross,len,norm,at,angle,frame,offset},camera};
+});
+
+const game=Daldongne.mount(document.querySelector("canvas"),s=>{document.querySelector("#retry").hidden=s.status!=="lost"});game.locale("en");document.querySelector("#start").onclick=()=>{game.start();document.querySelector("canvas").focus()};document.querySelector("#retry").onclick=()=>{game.start();document.querySelector("canvas").focus()};document.querySelector("#pause").onclick=()=>game.pause();document.querySelector("#reset").onclick=()=>game.reset();document.querySelector("#action").onclick=()=>game.interact();const held=new Map();function move(){let x=0,y=0;held.forEach(v=>{x+=v[0];y+=v[1]});game.pointer(x,y)}document.querySelectorAll('[data-dir]').forEach(b=>{b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture(e.pointerId);held.set(e.pointerId,b.dataset.dir.split(',').map(Number));move()};const stop=e=>{held.delete(e.pointerId);move()};b.onpointerup=stop;b.onpointercancel=stop;b.onlostpointercapture=stop});addEventListener('blur',()=>{held.clear();move()});</script></body></html>
