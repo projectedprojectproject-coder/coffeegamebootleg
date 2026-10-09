@@ -120,3 +120,15 @@ test('UFO previews four random star targets; only a star landing on the player h
   s.stars[0].n = s.n;run(s,3);
   assert.equal(s.hearts,2);
 });
+test('transparent mines stay clear of the start and doorsteps, and stepping on one costs a heart once', () => {
+  const s = g.newGame();g.start(s);noCat(s);noUfo(s);
+  assert.equal(s.mines.length,g.MINE.count);
+  for (const m of s.mines) {
+    assert.ok(g.math.angle(m.n,s.n) >= .3);
+    for (const site of g.SITES) assert.ok(g.math.angle(m.n,site.door) >= .2);
+  }
+  run(s,1);assert.equal(s.hearts,3);assert.equal(s.mines.length,g.MINE.count);
+  s.n = s.mines[0].n;g.step(s,.05);
+  assert.equal(s.hearts,2);assert.equal(s.mines.length,g.MINE.count-1);
+  run(s,3);assert.equal(s.hearts,2);
+});
