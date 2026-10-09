@@ -1,15 +1,15 @@
 <!doctype html><html lang="ko"><head><title>코스모 커피 배달 | 프롬프트 구조화 실습</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{margin:0;background:#0b1030;font-family:"Noto Sans KR","Malgun Gothic",sans-serif;color:#dfe6ff;overflow:auto}main{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}#stage{position:relative;flex:1;min-height:0;width:100%}canvas{width:100%;height:100%;object-fit:contain;display:block}nav{flex-shrink:0;display:flex;justify-content:center;gap:5px;flex-wrap:wrap;padding:9px}button{font:inherit;font-size:12px;border:1px solid #3d4a80;border-radius:3px;background:#141a33;color:#9ef3ff;padding:9px 11px;cursor:pointer;touch-action:none}#retry{position:absolute;left:50%;top:calc(50% + 14px);transform:translateX(-50%);font-size:18px;font-weight:600;padding:12px 30px;border:0;border-radius:24px;background:#ff9f43;color:#1a1230;touch-action:auto}p{font-size:11px;margin:0 8px 8px;color:#9fb0e0;text-align:center}</style></head><body><main><div id="stage"><canvas tabindex="0" aria-label="플레이할 게임"></canvas><button id="retry" hidden>다시 도전</button></div><nav><button id="start">시작 / 계속</button><button id="pause">잠깐 멈추기</button><button id="reset">처음으로</button><button id="action">커피 받기 / 전하기</button><button data-dir="0,-1" aria-label="위">↑</button><button data-dir="-1,0" aria-label="왼쪽">←</button><button data-dir="0,1" aria-label="아래">↓</button><button data-dir="1,0" aria-label="오른쪽">→</button></nav><p>시작을 누른 뒤 방향키 / WASD로 이동 · E / Space로 커피 받기·전하기 · 외계 고양이와 별똥별을 피하세요</p></main><script>/* Cosmo Coffee Run. Original geometry and software 3D renderer. No dependencies. */
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.Daldongne=api})(typeof globalThis!=='undefined'?globalThis:this,function(){
 'use strict';
-const W=1200,H=800,R=6.2,GAMMA=1.3,SPEED=.44,TAU=Math.PI*2,CUPS=6,HEARTS=3;
-// Enemy tuning. Distances are radians on the planet surface, times are seconds. The player walks at SPEED (.44 rad/s).
+const W=1200,H=800,R=6.2,GAMMA=1.3,SPEED=.64,TAU=Math.PI*2,CUPS=6,HEARTS=3;
+// Enemy tuning. Distances are radians on the planet surface, times are seconds. The player walks at SPEED (.64 rad/s).
 // A cat strolls at `slow`; once armed it gains `accel` every second but can only turn `turn` rad/s, so sidestep it.
-const CAT={max:3,slow:.24,accel:.23,turn:.5,trigger:.5,fuse:3,blast:.16,touch:.07,respawn:2.5};
-// Mines are almost invisible until the player is within `reveal`; stepping within `radius` sets one off.
-const MINE={count:12,radius:.055,reveal:.32};
+const CAT={max:3,slow:.44,accel:.23,turn:.5,trigger:.5,fuse:3,blast:.16,touch:.07,respawn:1.4};
+// Mines show their range as a faint dashed circle. Entering it starts a `fuse`; the blast only hurts if the player is still inside.
+const MINE={count:10,radius:.18,fuse:2,reveal:.5};
 // Follow camera: `up` above and `back` south of the player, aimed just over the bear's head.
 const CAM={up:8,back:8,look:.5,focal:1080,cy:400};
-const UFO={speed:.58,height:1.9,interval:5.5,stars:4,warn:1.5,gap:.3,fall:.45,radius:.11,spread:.42};
+const UFO={speed:.78,height:1.9,interval:5.5,stars:4,warn:1.5,gap:.3,fall:.45,radius:.11,spread:.42};
 const add=(a,b)=>a.map((v,i)=>v+b[i]),sub=(a,b)=>a.map((v,i)=>v-b[i]),mul=(a,k)=>a.map(v=>v*k),dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],len=a=>Math.hypot(...a),norm=a=>mul(a,1/(len(a)||1)),clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 const at=(lon,lat)=>[Math.sin(lon)*Math.cos(lat),Math.sin(lat),Math.cos(lon)*Math.cos(lat)];
 const angle=(a,b)=>Math.acos(clamp(dot(a,b),-1,1));
@@ -33,8 +33,8 @@ const SITES=[
 const ORDERS=SITES.slice(1,1+CUPS),CAFE=SITES[0];
 function newGame(seed=20261005){const n=at(-.13,-.025),north=frame(n).u;return {n,north,facing:0,time:0,moving:false,status:'ready',carrying:0,picked:false,done:[],target:'cafe',locale:'ko',message:'카페 앞에서 커피를 받아 보세요.',messageTime:8,steps:0,round:1,
  hearts:HEARTS,invuln:0,flash:0,seed:seed>>>0,cats:[],catTimer:2,ufo:{n:offset(n,north,0,1.2),timer:UFO.interval,phase:0},stars:[],fx:[],grade:0,mines:layMines(seed>>>0,n)};}
-// Mines are scattered around the delivery area, never on the start point, a doorstep or inside a building.
-function layMines(seed,home){const r=rng(seed^0x9e3779b9),out=[],hub=frame(CAFE.door);for(let tries=0;out.length<MINE.count&&tries<400;tries++){const n=offset(CAFE.door,hub.u,r()*TAU,.3+r()*1.6);if(blocked(n)||angle(n,home)<.3||SITES.some(s=>angle(n,s.door)<.2)||out.some(m=>angle(n,m.n)<.25))continue;out.push({n})}return out}
+// Mines are scattered around the delivery area. Their range never reaches the start point or a doorstep.
+function layMines(seed,home){const r=rng(seed^0x9e3779b9),out=[],hub=frame(CAFE.door),clear=MINE.radius+.22;for(let tries=0;out.length<MINE.count&&tries<3000;tries++){const n=offset(CAFE.door,hub.u,r()*TAU,.3+r()*1.7);if(blocked(n)||angle(n,home)<clear||SITES.some(s=>angle(n,s.door)<clear)||out.some(m=>angle(n,m.n)<MINE.radius*2.4))continue;out.push({n,fuse:-1})}return out}
 function rnd(s){s.seed=(Math.imul(s.seed,1664525)+1013904223)>>>0;return s.seed/4294967296}
 function start(s){if(s.status==='ready'||s.status==='paused')s.status='playing'}
 function pause(s){if(s.status==='playing')s.status='paused';else if(s.status==='paused')s.status='playing'}
@@ -60,7 +60,7 @@ const blocked=n=>SITES.some(b=>angle(n,b.n)<Math.max(b.w,b.d)/(2*R)+.033);
 function hurt(s,cause){
  if(s.status!=='playing'||s.invuln>0)return false;s.hearts--;s.invuln=1.5;s.flash=.5;
  if(s.hearts<=0){s.hearts=0;s.status='lost'}
- announce(s,({cat:'펑! 외계 고양이가 터졌어요.',mine:'쾅! 투명 지뢰를 밟았어요.'}[cause]||'별똥별에 맞았어요!')+' 생명 -1');return true;
+ announce(s,({cat:'펑! 외계 고양이가 터졌어요.',mine:'쾅! 지뢰가 터졌어요.'}[cause]||'별똥별에 맞았어요!')+' 생명 -1');return true;
 }
 // Alien cats: stroll toward the player, arm a 3 second fuse once close, then charge. A charging cat keeps
 // speeding up but can barely steer; it explodes when the fuse runs out or the moment it reaches the player.
@@ -84,9 +84,13 @@ function stepUfo(s,dt){
  for(const st of s.stars){st.t+=dt;if(st.t>=st.life){s.fx.push({n:st.n,t:0,life:.45,size:UFO.radius});if(angle(st.n,s.n)<UFO.radius)hurt(s,'star')}}
  s.stars=s.stars.filter(st=>st.t<st.life);
 }
-function stepMines(s){
- if(s.invuln>0)return;const i=s.mines.findIndex(m=>angle(m.n,s.n)<MINE.radius);
- if(i>=0){const[m]=s.mines.splice(i,1);s.fx.push({n:m.n,t:0,life:.5,size:.1});hurt(s,'mine')}
+function stepMines(s,dt){
+ for(const m of s.mines){
+  const inside=angle(m.n,s.n)<MINE.radius;
+  if(m.fuse<0){if(inside)m.fuse=0;continue}
+  m.fuse+=dt;if(m.fuse>=MINE.fuse){s.fx.push({n:m.n,t:0,life:.5,size:MINE.radius});if(inside)hurt(s,'mine');m.gone=true}
+ }
+ s.mines=s.mines.filter(m=>!m.gone);
 }
 function step(s,dt,input={}){
  if(s.status!=='playing')return;dt=clamp(dt,0,.05);s.time+=dt;s.messageTime=Math.max(0,s.messageTime-dt);s.invuln=Math.max(0,s.invuln-dt);s.flash=Math.max(0,s.flash-dt);
@@ -96,7 +100,7 @@ function step(s,dt,input={}){
   const east=norm(cross(s.north,s.n)),v=add(mul(east,x),mul(s.north,-y)),next=norm(add(s.n,mul(v,dt*SPEED)));
   if(!blocked(next)){s.n=next;s.north=norm(sub(s.north,mul(next,dot(s.north,next))));s.facing=Math.atan2(x,-y);s.steps+=dt*3}
  }
- stepMines(s);stepCats(s,dt);stepUfo(s,dt);
+ stepMines(s,dt);stepCats(s,dt);stepUfo(s,dt);
 }
 function chooseTarget(s,id){if(id==='cafe'||s.picked&&ORDERS.some(o=>o.id===id&&!s.done.includes(id)))s.target=id}
 // Geometry in true three-dimensional world coordinates. Canvas is the raster target.
@@ -110,6 +114,9 @@ const tone=(h,k=1)=>{const a=rgb(h);return '#'+CURVE[Math.min(255,a[0]*k|0)]+CUR
 function light(pts){const a=pts[0],b=pts[2],q=pts.length>3,c=q?pts[1]:a,d=q?pts[3]:pts[1],ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=d[0]-c[0],vy=d[1]-c[1],vz=d[2]-c[2],nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;return Math.abs(nx*LIGHT[0]+ny*LIGHT[1]+nz*LIGHT[2])/(Math.hypot(nx,ny,nz)||1)}
 // A renderable polygon. The unit vector toward its centre lets the renderer skip the far side of the planet cheaply.
 function mkPoly(pts,color,lit,layer){let x=0,y=0,z=0;for(const p of pts){x+=p[0];y+=p[1];z+=p[2]}const l=Math.hypot(x,y,z)||1;return {pts,color:color[0]==='#'?tone(color,lit?.76+.24*light(pts):1):color,layer,nx:x/l,ny:y/l,nz:z/l}}
+// A smooth ellipsoid for characters. It is kept as a centre and three axes, and drawn as a single
+// gradient-filled ellipse, so bears, neighbours and cats have no facets or seams.
+function mkOrb(f,c,r,color,sx=1,sy=1,sz=1,layer=2){const l=len(c)||1;return {orb:true,c,a:[mul(f.e,r*sx),mul(f.n,r*sy),mul(f.u,r*sz)],color:tone(color),hi:tone(color,1.2),lo:tone(color,.68),layer,nx:c[0]/l,ny:c[1]/l,nz:c[2]/l}}
 // Ellipsoid aligned to a local frame (e = right, n = up, u = back). j0 skips lower rings to make a dome.
 const UNIT={};
 function unit(seg,rings){const key=seg+'/'+rings;if(!UNIT[key]){const t=[];for(let j=0;j<=rings;j++)for(let i=0;i<=seg;i++)t.push(at(i/seg*TAU,-Math.PI/2+j/rings*Math.PI));UNIT[key]=t}return UNIT[key]}
@@ -225,14 +232,14 @@ function person(ball,n,f,shirt,hair,skin){
  b(0,.25,0,.17,shirt,1,1.45,.82,12,7);
  b(-.2,.29,-.05,.067,skin,.7,1.05,1,7,5);b(.2,.29,-.05,.067,skin,.7,1.05,1,7,5);
  b(0,.55,0,.19,skin,1,1.05,.95,14,8);
- b(0,.6,.045,.2,hair,1,.95,.88,12,7);b(0,.69,-.02,.16,hair,1.05,.5,.95,10,4);
+ b(0,.58,.075,.2,hair,1.02,.95,.85,12,7);b(0,.705,.005,.15,hair,1.08,.5,.95,10,4);
  for(const x of[-.065,.065])b(x,.565,-.165,.026,'#2f2a2a',1,1,1,6,4);
  for(const x of[-.115,.115])b(x,.49,-.14,.032,'#e58f7c',1,.6,.4,6,4);
  return pos;
 }
 // The neighbours never move, so each one is built once (again when it receives its cup).
 const npcCache={};
-function npcPolys(o,served){const key=o.id+served;if(!npcCache[key]){const out=[],f=frame(o.door),ball=(f,c,r,color,...rest)=>sphere((pts,col)=>out.push(mkPoly(pts,col,true,2)),f,c,r,color,...rest),pos=person(ball,o.door,f,o.shirt,o.hair,o.skin);if(served)cup(ball,(pts,col)=>out.push(mkPoly(pts,col,false,2)),f,pos(.24,.3,-.1),.9);npcCache[key]=out}return npcCache[key]}
+function npcPolys(o,served){const key=o.id+served;if(!npcCache[key]){const out=[],f=frame(o.door),ball=(f,c,r,color,sx,sy,sz)=>out.push(mkOrb(f,c,r,color,sx,sy,sz,2)),pos=person(ball,o.door,f,o.shirt,o.hair,o.skin);if(served)cup(ball,(pts,col)=>out.push(mkPoly(pts,col,false,2)),f,pos(.24,.3,-.1),.9);npcCache[key]=out}return npcCache[key]}
 function draw(c,s,{overlay=true}={}){
  const scene=sceneCache||(sceneCache=makeScene());const cam=camera(s),font=(weight,size)=>c.font=weight+' '+size+'px "Workshop", "Noto Sans KR", sans-serif',hz=cam.horizon;c.save();c.clearRect(0,0,W,H);
  // Night sky: twinkling stars, a glowing moon and a few drifting clouds above the horizon.
@@ -250,17 +257,18 @@ function draw(c,s,{overlay=true}={}){
  const seen=(n,k=hz-.1)=>dot(n,cam.eyeN)>k;
  const dynPoly=(pts,color,lit=false)=>dyn.push(mkPoly(pts,color,lit,L)),round=(pts,col)=>dyn.push(mkPoly(pts,col,true,L));
  const ball=(f,center,r,color,sx,sy,sz,seg,rings,j0)=>sphere(round,f,center,r,color,sx,sy,sz,seg,rings,j0);
+ const orb=(f,center,r,color,sx,sy,sz)=>dyn.push(mkOrb(f,center,r,color,sx,sy,sz,L));
  // Flat ring on the ground; radii are surface radians. Used for blast previews and shadows.
  function ring(n,r0,r1,color,dashed){const f=frame(n),pt=(a,r)=>add(mul(n,R+.045),add(mul(f.e,Math.cos(a)*r*R),mul(f.u,Math.sin(a)*r*R)));for(let i=0;i<20;i++){if(dashed&&i%4===3)continue;const a=i/20*TAU,b=(i+1)/20*TAU;dynPoly([pt(a,r0),pt(b,r0),pt(b,r1),pt(a,r1)],color)}}
  if(s.picked)for(const o of ORDERS){if(!seen(o.door))continue;const served=s.done.includes(o.id);lists.push(npcPolys(o,served));if(!served)labels.push({pos:mul(o.door,R+1.55),n:o.door,id:o.id})}
  if(!(s.invuln>0&&Math.floor(s.time*12)%2)){
-  const f={n:s.n,e:norm(cross(s.north,s.n)),u:s.north},pos=bear(ball,s.n,f,'#b9814f','#ff5d5d',s.moving?s.steps:null);
-  if(s.carrying){const rows=Math.ceil(s.carrying/2);dynPoly([pos(-.2,.29,-.13),pos(.2,.29,-.13),pos(.2,.29,-.15-rows*.16),pos(-.2,.29,-.15-rows*.16)],'#8f9ac4');for(let i=0;i<s.carrying;i++)cup(ball,dynPoly,f,pos((i%2-.5)*.16,.3,-.23-Math.floor(i/2)*.16))}
+  const f={n:s.n,e:norm(cross(s.north,s.n)),u:s.north},pos=bear(orb,s.n,f,'#b9814f','#ff5d5d',s.moving?s.steps:null);
+  if(s.carrying){const rows=Math.ceil(s.carrying/2);dynPoly([pos(-.2,.29,-.13),pos(.2,.29,-.13),pos(.2,.29,-.15-rows*.16),pos(-.2,.29,-.15-rows*.16)],'#8f9ac4');for(let i=0;i<s.carrying;i++)cup(orb,dynPoly,f,pos((i%2-.5)*.16,.3,-.23-Math.floor(i/2)*.16))}
  }
  // Alien cats face the way they run and fade from green to red while the fuse burns.
  s.cats.forEach((cat,i)=>{
   const n=cat.n;if(!seen(n))return;const k=cat.fuse<0?0:clamp(cat.fuse/CAT.fuse,0,1),col=mix('#6cf07a','#ff2222',k),u=mul(cat.dir,-1),f={n,e:norm(cross(u,n)),u};
-  const pulse=1+Math.sin(s.time*(8+k*26))*.1*k,hop=Math.abs(Math.sin(s.time*(9+k*10)+i*2))*.05,K=1.4,b=(x,y,z,r,color,sx,sy,sz,seg,rings)=>ball(f,add(mul(n,R+y*K+hop),add(mul(f.e,x*K),mul(f.u,z*K))),r*K,color,sx,sy,sz,seg,rings);
+  const pulse=1+Math.sin(s.time*(8+k*26))*.1*k,hop=Math.abs(Math.sin(s.time*(9+k*10)+i*2))*.05,K=1.4,b=(x,y,z,r,color,sx,sy,sz)=>orb(f,add(mul(n,R+y*K+hop),add(mul(f.e,x*K),mul(f.u,z*K))),r*K,color,sx,sy,sz);
   L=1.5;if(k>0){ring(n,CAT.blast*.9,CAT.blast,'rgba(255,70,70,'+(.35+.5*k)+')');ring(n,0,CAT.blast*.9,'rgba(255,70,70,'+(.08+.3*k)+')')}else{ring(n,0,.06,'rgba(120,255,150,.2)');ring(n,.066,.074,'rgba(130,255,160,.75)')}L=2;
   for(const x of[-.07,.07])b(x,.57,-.02,.028,'#e2ff9a',1,1,1,5,3);
   b(0,.15,.08,.15*pulse,col,.9,.8,1.3,10,6);b(0,.26,.32,.045,shade(col,.8),.7,2,.7,6,4);
@@ -270,8 +278,10 @@ function draw(c,s,{overlay=true}={}){
  });
  // Star strike previews: the marker fills up and turns red right before the star lands.
  L=1.5;for(const st of s.stars){if(!seen(st.n))continue;const k=st.t/st.life,hot=k>.6,blink=st.life-st.t<.4&&Math.floor(s.time*14)%2;ring(st.n,UFO.radius*.8,UFO.radius,hot?'#ff5a3c':'#ffa733',true);if(!blink)ring(st.n,0,UFO.radius*.8*k,hot?'rgba(255,90,60,.7)':'rgba(255,190,90,.55)')}
- // Transparent mines: a faint shimmer that only firms up when the bear is close.
- for(const m of s.mines){if(!seen(m.n))continue;const near=clamp(1-angle(m.n,s.n)/MINE.reveal,0,1),a=.07+.38*near+.03*Math.sin(s.time*4+m.n[0]*9);ring(m.n,0,.022,'rgba(215,230,255,'+a+')');ring(m.n,.03,.037,'rgba(215,230,255,'+a*1.2+')')}
+ // Mines: a faint dashed range circle that firms up as the bear gets close, then a red countdown once triggered.
+ for(const m of s.mines){if(!seen(m.n))continue;
+  if(m.fuse<0){const a=.2+.4*clamp(1-angle(m.n,s.n)/MINE.reveal,0,1);ring(m.n,MINE.radius*.93,MINE.radius,'rgba(215,230,255,'+a+')',true);ring(m.n,0,.022,'rgba(215,230,255,'+(a+.15)+')')}
+  else{const k=m.fuse/MINE.fuse;ring(m.n,MINE.radius*.93,MINE.radius,'#ff5a3c');ring(m.n,0,MINE.radius*.93*k,'rgba(255,80,60,.5)');ring(m.n,0,.024,Math.floor(s.time*(6+k*14))%2?'#ffffff':'#ff2222')}}
  if(seen(s.ufo.n,.1)){const u=s.ufo,f=frame(u.n),c0=mul(u.n,R+UFO.height+Math.sin(s.time*2)*.06),charging=u.timer<.8;
   L=1.4;ring(u.n,0,.075,'rgba(0,0,0,.28)');L=3;
   ball(f,c0,.5,'#aab3cc',1,.2,1,20,6);ball(f,add(c0,mul(u.n,.06)),.25,'#7fe7ff',1,.9,1,14,10,5);
@@ -279,11 +289,19 @@ function draw(c,s,{overlay=true}={}){
  L=2;labels.push({pos:mul(CAFE.door,R+1.5),n:CAFE.door,id:'cafe'});
  // Cull, project and depth-sort. Written out with plain numbers because this runs for every polygon each frame.
  const faces=[],[ex,ey,ez]=cam.eye,[fx,fy,fz]=cam.f,[rx,ry,rz]=cam.right,[ux,uy,uz]=cam.up,[nx,ny,nz]=cam.eyeN;
- for(const list of lists)for(const p of list){if(p.nx*nx+p.ny*ny+p.nz*nz<(p.layer===0?hz-.04:p.layer>=3?hz-.4:hz-.12))continue;const m=p.pts.length,xy=new Array(m*2);let zs=0,x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(let i=0;i<m;i++){const v=p.pts[i],dx=v[0]-ex,dy=v[1]-ey,dz=v[2]-ez,z=dx*fx+dy*fy+dz*fz,k=CAM.focal/z,x=W/2+(dx*rx+dy*ry+dz*rz)*k,y=CAM.cy-(dx*ux+dy*uy+dz*uz)*k;xy[i*2]=x;xy[i*2+1]=y;zs+=z;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}if(x1<0||x0>W||y1<0||y0>H)continue;faces.push({xy,color:p.color,layer:p.layer,z:zs/m})}
+ for(const list of lists)for(const p of list){if(p.nx*nx+p.ny*ny+p.nz*nz<(p.layer===0?hz-.04:p.layer>=3?hz-.4:hz-.12))continue;
+  if(p.orb){const v=p.c,dx=v[0]-ex,dy=v[1]-ey,dz=v[2]-ez,z=dx*fx+dy*fy+dz*fz,k=CAM.focal/z,x=W/2+(dx*rx+dy*ry+dz*rz)*k,y=CAM.cy-(dx*ux+dy*uy+dz*uz)*k;let m11=0,m12=0,m22=0;
+   // The outline of an ellipsoid seen from afar is an ellipse whose shape matrix is the sum of its projected axes.
+   for(const a of p.a){const ax=(a[0]*rx+a[1]*ry+a[2]*rz)*k,ay=-(a[0]*ux+a[1]*uy+a[2]*uz)*k;m11+=ax*ax;m12+=ax*ay;m22+=ay*ay}
+   const h=(m11+m22)/2,q=Math.sqrt(Math.max(0,h*h-(m11*m22-m12*m12))),r1=Math.sqrt(h+q),r2=Math.sqrt(Math.max(0,h-q));if(x+r1<0||x-r1>W||y+r1<0||y-r1>H)continue;
+   faces.push({orb:p,x,y,r1,r2,rot:.5*Math.atan2(2*m12,m11-m22),layer:p.layer,z});continue}
+  const m=p.pts.length,xy=new Array(m*2);let zs=0,x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(let i=0;i<m;i++){const v=p.pts[i],dx=v[0]-ex,dy=v[1]-ey,dz=v[2]-ez,z=dx*fx+dy*fy+dz*fz,k=CAM.focal/z,x=W/2+(dx*rx+dy*ry+dz*rz)*k,y=CAM.cy-(dx*ux+dy*uy+dz*uz)*k;xy[i*2]=x;xy[i*2+1]=y;zs+=z;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}if(x1<0||x0>W||y1<0||y0>H)continue;faces.push({xy,color:p.color,layer:p.layer,z:zs/m})}
  faces.sort((a,b)=>a.layer-b.layer||b.z-a.z);
  // Haze along the horizon and a bright rim, painted over the ground before anything that stands on it.
  let shaded=false;const limb=()=>{shaded=true;c.save();globe();c.clip();const g=c.createLinearGradient(0,top,0,top+190);g.addColorStop(0,'rgba(196,208,255,.34)');g.addColorStop(1,'rgba(196,208,255,0)');c.fillStyle=g;c.fillRect(0,top,W,190);const v=c.createLinearGradient(0,H-220,0,H);v.addColorStop(0,'rgba(14,10,48,0)');v.addColorStop(1,'rgba(14,10,48,.35)');c.fillStyle=v;c.fillRect(0,H-220,W,220);c.restore();c.strokeStyle='rgba(190,215,255,.6)';c.lineWidth=2;globe();c.stroke()};
- for(const p of faces){if(!shaded&&p.layer>1.3)limb();const xy=p.xy;c.fillStyle=p.color;c.beginPath();c.moveTo(xy[0],xy[1]);for(let i=2;i<xy.length;i+=2)c.lineTo(xy[i],xy[i+1]);c.closePath();c.fill()}
+ for(const p of faces){if(!shaded&&p.layer>1.3)limb();
+  if(p.orb){const o=p.orb,g=c.createRadialGradient(p.x-p.r2*.3,p.y-p.r2*.38,p.r2*.08,p.x,p.y,p.r1*1.02);g.addColorStop(0,o.hi);g.addColorStop(.5,o.color);g.addColorStop(1,o.lo);c.fillStyle=g;c.beginPath();c.ellipse(p.x,p.y,p.r1,p.r2,p.rot,0,TAU);c.fill();continue}
+  const xy=p.xy;c.fillStyle=p.color;c.beginPath();c.moveTo(xy[0],xy[1]);for(let i=2;i<xy.length;i+=2)c.lineTo(xy[i],xy[i+1]);c.closePath();c.fill()}
  if(!shaded)limb();
  // Warm lamps glow on top of the dark domes.
  c.globalCompositeOperation='lighter';for(const b of SITES){if(b.type!=='dome'||!seen(b.n))continue;const p=cam.project(mul(b.n,R+.3+b.h*.6)),r=CAM.focal/p.z*.75,g=c.createRadialGradient(p.x,p.y,0,p.x,p.y,r);g.addColorStop(0,'rgba(255,196,110,.5)');g.addColorStop(1,'rgba(255,196,110,0)');c.fillStyle=g;c.fillRect(p.x-r,p.y-r,r*2,r*2)}c.globalCompositeOperation='source-over';

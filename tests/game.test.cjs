@@ -64,7 +64,7 @@ test('each hit drains one heart, with a short grace period; zero hearts ends the
 test('alien cat strolls toward the player and only arms its fuse when close', () => {
   const s = g.newGame();g.start(s);noUfo(s);noCat(s);
   s.cats = [{n:g.math.offset(s.n,s.north,0,.9),fuse:-1,dir:s.north}];
-  run(s,1);
+  run(s,.5);
   const d = g.math.angle(s.cats[0].n,s.n);
   assert.ok(d < .9 && d > .9 - g.CAT.slow * 1.2);
   assert.equal(s.cats[0].fuse,-1);
@@ -120,15 +120,25 @@ test('UFO previews four random star targets; only a star landing on the player h
   s.stars[0].n = s.n;run(s,3);
   assert.equal(s.hearts,2);
 });
-test('transparent mines stay clear of the start and doorsteps, and stepping on one costs a heart once', () => {
-  const s = g.newGame();g.start(s);noCat(s);noUfo(s);
+test('mine ranges stay clear of the start and doorsteps', () => {
+  const s = g.newGame();
   assert.equal(s.mines.length,g.MINE.count);
   for (const m of s.mines) {
-    assert.ok(g.math.angle(m.n,s.n) >= .3);
-    for (const site of g.SITES) assert.ok(g.math.angle(m.n,site.door) >= .2);
+    assert.ok(g.math.angle(m.n,s.n) > g.MINE.radius);
+    for (const site of g.SITES) assert.ok(g.math.angle(m.n,site.door) > g.MINE.radius);
   }
-  run(s,1);assert.equal(s.hearts,3);assert.equal(s.mines.length,g.MINE.count);
-  s.n = s.mines[0].n;g.step(s,.05);
-  assert.equal(s.hearts,2);assert.equal(s.mines.length,g.MINE.count-1);
-  run(s,3);assert.equal(s.hearts,2);
+});
+test('entering a mine range starts a 2 second fuse; the blast hurts only a player still inside', () => {
+  const s = g.newGame();g.start(s);noCat(s);noUfo(s);
+  const home = s.n, mine = s.mines[0];
+  run(s,1);assert.equal(mine.fuse,-1);assert.equal(s.hearts,3);
+  // Step in, then stay: one heart lost after two seconds.
+  s.n = g.math.offset(mine.n,g.math.frame(mine.n).u,0,g.MINE.radius*.5);
+  run(s,1);assert.ok(mine.fuse > 0);assert.equal(s.hearts,3);assert.equal(s.mines.length,g.MINE.count);
+  run(s,1.2);assert.equal(s.hearts,2);assert.equal(s.mines.length,g.MINE.count-1);
+  // Step in, then leave before it blows: no damage, but the mine is still spent.
+  s.invuln = 0;const other = s.mines[0];
+  s.n = other.n;g.step(s,.05);assert.ok(other.fuse >= 0);
+  s.n = home;run(s,2.2);
+  assert.equal(s.hearts,2);assert.equal(s.mines.length,g.MINE.count-2);
 });
